@@ -1,0 +1,261 @@
+{
+  "name": "Support Triage AI Agent (FIXED)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "182719e7-6c0e-443c-9102-4c8ef448b0ae",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "support-triage-v3"
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            { "name": "customer_name", "stringValue": "={{ $json.body?.customer_name ?? $json.customer_name }}" },
+            { "name": "email", "stringValue": "={{ $json.body?.email ?? $json.email }}" },
+            { "name": "message", "stringValue": "={{ $json.body?.message ?? $json.message }}" },
+            { "name": "category", "stringValue": "={{ $json.body?.category ?? $json.category }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee92afbe-ab59-4e10-b39e-09e264190f83",
+      "name": "Extract Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer YOUR_GROQ_API_KEY_HERE" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a customer support triage agent. Analyze the customer message and respond ONLY with a valid JSON object. No extra text, no markdown. Format: {\\\"priority\\\": \\\"high\\\", \\\"department\\\": \\\"billing\\\", \\\"summary\\\": \\\"brief summary\\\", \\\"suggested_action\\\": \\\"action to take\\\"}. Priority: high, medium, or low. Department: billing, technical, or general.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Customer: {{ $json.customer_name }}\\nEmail: {{ $json.email }}\\nMessage: {{ $json.message }}\\nCategory: {{ $json.category }}\\n\\nTriage this and return only JSON.\"\n    }\n  ],\n  \"temperature\": 0.2,\n  \"max_tokens\": 150\n}",
+        "options": {}
+      },
+      "id": "3601313d-a688-45e7-b5b0-d82140d2476d",
+      "name": "Groq AI Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.item.json.choices[0].message.content;\nlet parsed;\ntry {\n  const clean = raw.replace(/```json|```/g, '').trim();\n  parsed = JSON.parse(clean);\n} catch (e) {\n  parsed = { priority: 'medium', department: 'general', summary: 'Could not parse AI response', suggested_action: 'Manual review needed' };\n}\nconst prev = $('Extract Fields').item.json;\nreturn {\n  Timestamp: new Date().toISOString(),\n  'Customer Name': (prev.customer_name || 'Unknown').replace(/^=/, ''),\n  Email: (prev.email || 'no-email@example.com').replace(/^=/, ''),\n  Priority: (parsed.priority || 'medium').toUpperCase(),\n  Department: parsed.department || 'general',\n  Summary: parsed.summary || 'No summary',\n  'Suggested Action': parsed.suggested_action || 'Review manually',\n  'Original Message': (prev.message || '').replace(/^=/, ''),\n  priority_lower: (parsed.priority || 'medium').toLowerCase()\n};"
+      },
+      "id": "24105f3b-9f98-437c-aba5-55bc456dfd6a",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.priority_lower }}",
+                    "rightValue": "high",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "High"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.priority_lower }}",
+                    "rightValue": "medium",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Medium"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.priority_lower }}",
+                    "rightValue": "low",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Low"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "64e190df-d5b7-415b-b19f-d31aae55e3f2",
+      "name": "Priority Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1lre_w2iVERBlOaB8dR2EMsyXPtXNij5kWl59EyJLcMo", "mode": "id" },
+        "sheetName": { "mode": "name", "value": "Tickets" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Customer Name", "displayName": "Customer Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Email", "displayName": "Email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Priority", "displayName": "Priority", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Department", "displayName": "Department", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Summary", "displayName": "Summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Suggested Action", "displayName": "Suggested Action", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Original Message", "displayName": "Original Message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "41edd0cb-c93b-4de8-ab07-fe20b5e52745",
+      "name": "Sheet - High Priority",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 160],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4Qx7gSl7B1URe0a9", "name": "Google Sheets OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1lre_w2iVERBlOaB8dR2EMsyXPtXNij5kWl59EyJLcMo", "mode": "id" },
+        "sheetName": { "mode": "name", "value": "Tickets" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Customer Name", "displayName": "Customer Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Email", "displayName": "Email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Priority", "displayName": "Priority", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Department", "displayName": "Department", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Summary", "displayName": "Summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Suggested Action", "displayName": "Suggested Action", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Original Message", "displayName": "Original Message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2abad57-190a-456f-afbc-a2650390a1d4",
+      "name": "Sheet - Medium Priority",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4Qx7gSl7B1URe0a9", "name": "Google Sheets OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1lre_w2iVERBlOaB8dR2EMsyXPtXNij5kWl59EyJLcMo", "mode": "id" },
+        "sheetName": { "mode": "name", "value": "Tickets" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Customer Name", "displayName": "Customer Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Email", "displayName": "Email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Priority", "displayName": "Priority", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Department", "displayName": "Department", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Summary", "displayName": "Summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Suggested Action", "displayName": "Suggested Action", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Original Message", "displayName": "Original Message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dc5ca3eb-201d-4a7d-b4fd-32a6acc4d736",
+      "name": "Sheet - Low Priority",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 440],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "4Qx7gSl7B1URe0a9", "name": "Google Sheets OAuth2 API" }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', ticket: { customer: $json['Customer Name'], priority: $json.Priority, department: $json.Department, summary: $json.Summary, action: $json['Suggested Action'], timestamp: $json.Timestamp } }) }}",
+        "options": {}
+      },
+      "id": "2870354f-e5a8-4f1c-91cc-690cfc7b1208",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 500]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Extract Fields", "type": "main", "index": 0 }]]
+    },
+    "Extract Fields": {
+      "main": [[{ "node": "Groq AI Triage", "type": "main", "index": 0 }]]
+    },
+    "Groq AI Triage": {
+      "main": [[{ "node": "Parse AI Response", "type": "main", "index": 0 }]]
+    },
+    "Parse AI Response": {
+      "main": [[
+        { "node": "Priority Router", "type": "main", "index": 0 },
+        { "node": "Send Response", "type": "main", "index": 0 }
+      ]]
+    },
+    "Priority Router": {
+      "main": [
+        [{ "node": "Sheet - High Priority", "type": "main", "index": 0 }],
+        [{ "node": "Sheet - Medium Priority", "type": "main", "index": 0 }],
+        [{ "node": "Sheet - Low Priority", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}
